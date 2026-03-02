@@ -11,6 +11,7 @@ function git(cmd: string): string {
 }
 
 const nextConfig: NextConfig = {
+  turbopack: {},
   env: {
     NEXT_PUBLIC_APP_VERSION: git("describe --tags --always") || "dev",
     NEXT_PUBLIC_COMMIT_HASH: git("rev-parse --short HEAD") || "unknown",
