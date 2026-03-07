@@ -695,7 +695,7 @@ export function Header() {
   return (
     <>
       <header className="flex shrink-0 items-center justify-between border-b border-stone-200 bg-stone-50 px-4 py-3 md:px-8 dark:border-[#23282e] dark:bg-[#121519]">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 ml-11 md:ml-0">
           <GatewayStatusBadge status={gwStatus} health={gwHealth} latencyMs={gwLatencyMs} />
         </div>
 
