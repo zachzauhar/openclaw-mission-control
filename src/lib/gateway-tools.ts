@@ -9,6 +9,15 @@
  */
 
 import { getGatewayToken, getGatewayUrl } from "./paths";
+import { runCli } from "./openclaw";
+
+/** Thrown when the gateway returns 404 for a tool (not registered / not available). */
+export class ToolNotAvailableError extends Error {
+  constructor(tool: string, detail?: string) {
+    super(detail || `Tool not available: ${tool}`);
+    this.name = "ToolNotAvailableError";
+  }
+}
 
 // ── Types ────────────────────────────────────────
 
@@ -66,6 +75,9 @@ export async function invokeGatewayTool<T>(
     const detail =
       body?.error?.message ||
       (body ? JSON.stringify(body) : response.statusText);
+    if (response.status === 404) {
+      throw new ToolNotAvailableError(tool, detail);
+    }
     throw new Error(`Gateway ${tool} failed (${response.status}): ${detail}`);
   }
 
@@ -92,35 +104,41 @@ export async function gatewayMemorySearch(opts: {
     if (!Number.isNaN(parsed)) args.min_score = parsed;
   }
 
-  const result = await invokeGatewayTool<MemorySearchToolResult>(
-    "memory_search",
-    args,
-    30000,
-  );
-
-  if (Array.isArray(result.results)) {
-    return { results: result.results };
-  }
-
-  // Fallback: parse from content blocks
-  const text = Array.isArray(result.content)
-    ? result.content
-        .map((item) => (item?.type === "text" ? String(item.text || "") : ""))
-        .filter(Boolean)
-        .join("\n")
-    : "";
-
-  if (!text) {
-    console.warn("gatewayMemorySearch: gateway returned no results and no parseable content");
-    return { results: [] };
-  }
-
   try {
-    const parsed = JSON.parse(text) as { results?: MemorySearchResult[] };
-    return { results: Array.isArray(parsed.results) ? parsed.results : [] };
-  } catch {
-    console.warn("gatewayMemorySearch: failed to parse content block as JSON");
-    return { results: [] };
+    const result = await invokeGatewayTool<MemorySearchToolResult>(
+      "memory_search",
+      args,
+      30000,
+    );
+
+    if (Array.isArray(result.results)) {
+      return { results: result.results };
+    }
+
+    // Fallback: parse from content blocks
+    const text = Array.isArray(result.content)
+      ? result.content
+          .map((item) => (item?.type === "text" ? String(item.text || "") : ""))
+          .filter(Boolean)
+          .join("\n")
+      : "";
+
+    if (!text) {
+      return { results: [] };
+    }
+
+    try {
+      const parsed = JSON.parse(text) as { results?: MemorySearchResult[] };
+      return { results: Array.isArray(parsed.results) ? parsed.results : [] };
+    } catch {
+      return { results: [] };
+    }
+  } catch (err) {
+    // Memory search not available — return empty results instead of crashing
+    if (err instanceof ToolNotAvailableError) {
+      return { results: [] };
+    }
+    throw err;
   }
 }
 
@@ -134,18 +152,29 @@ export async function gatewayMemoryIndex(opts?: {
   if (opts?.agent) args.agent = opts.agent;
   if (opts?.force) args.force = true;
 
-  const result = await invokeGatewayTool<MemoryIndexToolResult>(
-    "memory_index",
-    args,
-    60000,
-  );
+  try {
+    const result = await invokeGatewayTool<MemoryIndexToolResult>(
+      "memory_index",
+      args,
+      60000,
+    );
 
-  if (result.output) return result.output;
+    if (result.output) return result.output;
 
-  return result.content
-    ?.map((item) => (item?.type === "text" ? String(item.text || "") : ""))
-    .filter(Boolean)
-    .join("\n") || "";
+    return result.content
+      ?.map((item) => (item?.type === "text" ? String(item.text || "") : ""))
+      .filter(Boolean)
+      .join("\n") || "";
+  } catch (err) {
+    // Gateway doesn't expose memory_index — fall back to CLI
+    if (err instanceof ToolNotAvailableError) {
+      const cliArgs = ["memory", "index"];
+      if (opts?.agent) cliArgs.push("--agent", opts.agent);
+      if (opts?.force) cliArgs.push("--force");
+      return runCli(cliArgs, 60000);
+    }
+    throw err;
+  }
 }
 
 // ── Wake agent ───────────────────────────────────

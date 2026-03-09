@@ -497,15 +497,14 @@ export async function POST(request: NextRequest) {
           { raw: patchRaw, baseHash: hash, restartDelayMs: 2000 },
           15000
         );
+        // Reindex is best-effort — the config patch (extraPaths) already succeeded
+        let reindexWarning: string | undefined;
         try {
           await gatewayMemoryIndex({ force: true });
         } catch (err) {
-          return NextResponse.json(
-            { ok: false, action, error: String(err), extraPaths: mergedExtra },
-            { status: 500 }
-          );
+          reindexWarning = `Reindex skipped: ${err instanceof Error ? err.message : String(err)}`;
         }
-        return NextResponse.json({ ok: true, action, extraPaths: mergedExtra });
+        return NextResponse.json({ ok: true, action, extraPaths: mergedExtra, ...(reindexWarning ? { warning: reindexWarning } : {}) });
       }
 
       default:
