@@ -1,10 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { open, readFile, stat } from "fs/promises";
+import { open, readdir, readFile, stat } from "fs/promises";
 import { join } from "path";
 import { getOpenClawHome } from "@/lib/paths";
 
 const OPENCLAW_HOME = getOpenClawHome();
 const LOGS_DIR = join(OPENCLAW_HOME, "logs");
+// OpenClaw v2026.3.23+ writes tslog JSON to /tmp/openclaw/openclaw-YYYY-MM-DD.log.
+// On macOS, /tmp → /private/tmp; os.tmpdir() returns a user-scoped dir. Check both.
+const TMP_LOG_CANDIDATES = [
+  "/tmp/openclaw",
+  "/private/tmp/openclaw",
+  join(process.env.TMPDIR || "/tmp", "openclaw"),
+];
 
 type LogEntry = {
   line: number;
@@ -48,11 +55,86 @@ function tsToMs(ts: string): number {
 }
 
 /**
+ * Map tslog logLevelName to our level type.
+ */
+function tslogLevel(
+  levelName: string,
+  fileLevel: "info" | "error",
+): "info" | "warn" | "error" {
+  if (fileLevel === "error") return "error";
+  const upper = levelName.toUpperCase();
+  if (upper === "ERROR" || upper === "FATAL") return "error";
+  if (upper === "WARN" || upper === "WARNING") return "warn";
+  return "info";
+}
+
+/**
+ * Try to parse a line as tslog JSON format (OpenClaw v2026.3.23+).
+ * Returns a LogEntry on success, null if not tslog JSON.
+ *
+ * Format: {"0": "...", "1": "...", "_meta": { "date", "logLevelName", ... }, "time": "..."}
+ */
+function parseTslogLine(
+  raw: string,
+  lineNum: number,
+  fileLevel: "info" | "error",
+): LogEntry | null {
+  if (raw.charCodeAt(0) !== 0x7B /* { */) return null;
+  try {
+    const obj = JSON.parse(raw);
+    const meta = obj._meta;
+    if (!meta || typeof meta !== "object") return null;
+
+    const time = meta.date || obj.time || "";
+    const levelName = typeof meta.logLevelName === "string" ? meta.logLevelName : "";
+    const level = tslogLevel(levelName, fileLevel);
+
+    // Extract source/subsystem from field "0" (may be a JSON string like '{"subsystem":"gateway"}')
+    let source = "gateway";
+    const field0 = obj["0"];
+    if (typeof field0 === "string") {
+      try {
+        const parsed = JSON.parse(field0);
+        if (parsed && typeof parsed === "object" && parsed.subsystem) {
+          source = parsed.subsystem;
+        }
+      } catch {
+        // field0 is a plain message, not nested JSON
+      }
+    }
+
+    // Collect numbered fields into message (skip "0" if it was metadata JSON)
+    const parts: string[] = [];
+    for (let k = 0; k < 100; k++) {
+      const val = obj[String(k)];
+      if (val === undefined) break;
+      // Skip field "0" if it was parsed as subsystem metadata
+      if (k === 0 && source !== "gateway") continue;
+      parts.push(String(val));
+    }
+    const message = parts.join(" ").trim() || levelName || "log entry";
+
+    return {
+      line: lineNum,
+      time,
+      timeMs: tsToMs(time),
+      source,
+      level,
+      message,
+      raw,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Parse raw log lines into structured entries.
  * Handles:
- *   1. Structured lines: `TIMESTAMP [SOURCE] MESSAGE`
- *   2. Timestamp-only lines: `TIMESTAMP MESSAGE` (no source tag)
- *   3. Continuation lines: no timestamp — appended to previous entry
+ *   1. tslog JSON format: `{"0": "...", "_meta": {...}, "time": "..."}`
+ *   2. Structured lines: `TIMESTAMP [SOURCE] MESSAGE`
+ *   3. Timestamp-only lines: `TIMESTAMP MESSAGE` (no source tag)
+ *   4. Continuation lines: no timestamp — appended to previous entry
  */
 function parseLines(
   lines: string[],
@@ -63,6 +145,13 @@ function parseLines(
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
     if (!raw) continue;
+
+    // Try tslog JSON format (OpenClaw v2026.3.23+)
+    const tslogEntry = parseTslogLine(raw, i, fileLevel);
+    if (tslogEntry) {
+      entries.push(tslogEntry);
+      continue;
+    }
 
     // Try structured: TIMESTAMP [source] message
     const structMatch = raw.match(STRUCTURED_RE);
@@ -89,8 +178,6 @@ function parseLines(
       const time = tsMatch[1];
       const message = tsMatch[2];
       const level = detectLevel(message, fileLevel);
-      // Infer source: error log lines without tags are system-level;
-      // gateway.log lines without tags are agent output
       const source = fileLevel === "error" ? "system" : "agent";
       entries.push({
         line: i,
@@ -110,7 +197,6 @@ function parseLines(
       prev.message += "\n" + raw;
       prev.raw += "\n" + raw;
     }
-    // else: orphan continuation before any entry — skip
   }
 
   return entries;
@@ -149,6 +235,25 @@ export async function GET(request: NextRequest) {
         path: join(LOGS_DIR, "gateway.err.log"),
         level: "error",
       });
+    }
+    // OpenClaw v2026.3.23+ writes tslog JSON to /tmp/openclaw/openclaw-YYYY-MM-DD.log.
+    // Include recent log files when available.
+    if (type === "gateway" || type === "all") {
+      for (const tmpDir of TMP_LOG_CANDIDATES) {
+        try {
+          const tmpEntries = await readdir(tmpDir, { encoding: "utf8" });
+          const logFiles = tmpEntries
+            .filter((f) => f.startsWith("openclaw-") && f.endsWith(".log"))
+            .sort()
+            .slice(-2); // Last 2 days
+          for (const f of logFiles) {
+            files.push({ path: join(tmpDir, f), level: "info" });
+          }
+          if (logFiles.length > 0) break; // Found logs, stop searching
+        } catch {
+          // This candidate dir doesn't exist — try the next one
+        }
+      }
     }
 
     const fileResults = await Promise.all(
