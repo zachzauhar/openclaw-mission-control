@@ -36,7 +36,14 @@ export async function GET() {
         tools: a.tools || [],
         status: "active",
         bindings: [],
+        channels: [],
         subagents: [],
+        runtimeSubagents: [],
+        identitySnippet: null,
+        identityTheme: null,
+        identityAvatar: null,
+        identitySource: null,
+        skills: null,
       }),
     );
 
