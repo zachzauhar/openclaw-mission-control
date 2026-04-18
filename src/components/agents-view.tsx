@@ -203,7 +203,8 @@ function formatAgo(ms: number | null): string {
   return `${Math.floor(diff / 86_400_000)}d ago`;
 }
 
-function shortModel(m: string): string {
+function shortModel(m: string | undefined | null): string {
+  if (!m) return "unknown";
   const parts = m.split("/");
   return parts[parts.length - 1];
 }
@@ -220,7 +221,8 @@ function channelIcon(ch: string): string {
   }
 }
 
-function shortPath(p: string): string {
+function shortPath(p: string | undefined | null): string {
+  if (!p) return "";
   const parts = p.split("/");
   return parts[parts.length - 1] || parts[parts.length - 2] || p;
 }
