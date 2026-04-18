@@ -35,6 +35,8 @@ export async function GET() {
         description: a.description,
         tools: a.tools || [],
         status: "active",
+        bindings: [],
+        subagents: [],
       }),
     );
 
