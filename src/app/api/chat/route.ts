@@ -1,4 +1,4 @@
-import { getAgentApiUrl } from "@/lib/paths";
+import { getAgentApiUrl, getAgentAuthHeaders } from "@/lib/paths";
 
 /**
  * Chat endpoint — proxies messages to our Open Claw agent's HTTP API.
@@ -53,7 +53,7 @@ export async function POST(req: Request) {
 
     const agentRes = await fetch(`${apiUrl}/api/chat`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: getAgentAuthHeaders(),
       body: JSON.stringify({
         message: text,
         channel_id: channelId,

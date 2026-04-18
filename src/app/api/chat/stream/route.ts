@@ -1,4 +1,4 @@
-import { getAgentApiUrl } from "@/lib/paths";
+import { getAgentApiUrl, getAgentAuthHeaders } from "@/lib/paths";
 
 /**
  * Streaming chat endpoint — simplified for our Open Claw agent.
@@ -36,7 +36,7 @@ export async function POST(req: Request) {
     const apiUrl = getAgentApiUrl();
     const agentRes = await fetch(`${apiUrl}/api/chat`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: getAgentAuthHeaders(),
       body: JSON.stringify({ message: text, channel_id: channelId }),
       signal: AbortSignal.timeout(180_000),
     });

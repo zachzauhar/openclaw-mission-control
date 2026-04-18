@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAgentApiUrl } from "@/lib/paths";
+import { getAgentApiUrl, getAgentAuthHeaders } from "@/lib/paths";
 
 export const dynamic = "force-dynamic";
 

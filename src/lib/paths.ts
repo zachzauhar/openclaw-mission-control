@@ -15,6 +15,15 @@ export function getAgentApiUrl(): string {
   return process.env.OPENCLAW_API_URL || DEFAULT_API_URL;
 }
 
+export function getAgentAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const token = process.env.OPENCLAW_GATEWAY_TOKEN || "";
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  return headers;
+}
+
 // ── Kept for compatibility with components that reference these ──
 
 export function getOpenClawHome(): string {

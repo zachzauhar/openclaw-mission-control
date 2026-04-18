@@ -2,7 +2,7 @@
  * Simplified Open Claw client — HTTP-only transport to our agent API.
  */
 
-import { getAgentApiUrl } from "./paths";
+import { getAgentApiUrl, getAgentAuthHeaders } from "./paths";
 
 export type TransportMode = "cli" | "http" | "auto";
 
@@ -46,7 +46,7 @@ class OpenClawHttpClient implements OpenClawClient {
     const command = args.join(" ");
     const res = await fetch(`${this.baseUrl}/api/chat`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: getAgentAuthHeaders(),
       body: JSON.stringify({ message: command }),
       signal: AbortSignal.timeout(timeout),
     });
@@ -90,7 +90,7 @@ class OpenClawHttpClient implements OpenClawClient {
   async readFile(path: string): Promise<string> {
     const res = await fetch(`${this.baseUrl}/api/chat`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: getAgentAuthHeaders(),
       body: JSON.stringify({ message: `read file ${path}` }),
     });
     const data = await res.json();
