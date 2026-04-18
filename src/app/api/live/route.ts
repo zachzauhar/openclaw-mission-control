@@ -62,7 +62,8 @@ export async function GET() {
       url: apiUrl,
       uptime,
     },
-    cron: { active: 0, total: 0 },
-    sessions: { active: 0 },
+    cron: { active: 0, total: 0, jobs: [] },
+    sessions: { active: 0, list: [] },
+    recentActivity: [],
   });
 }
