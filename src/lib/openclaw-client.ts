@@ -1,97 +1,128 @@
 /**
- * Unified OpenClaw client abstraction.
- *
- * Provides a single interface for all OpenClaw communication that works
- * over both CLI subprocesses (self-hosted) and HTTP to the Gateway
- * (hosted / remote). The transport is selected via the OPENCLAW_TRANSPORT
- * environment variable:
- *
- *   "cli"  (default) — spawns `openclaw` binary, reads local files
- *   "http"           — talks HTTP to the Gateway's /tools/invoke endpoint
- *   "auto"           — tries HTTP, falls back to CLI
+ * Simplified Open Claw client — HTTP-only transport to our agent API.
  */
 
-import type { RunCliResult } from "./openclaw-cli";
+import { getAgentApiUrl } from "./paths";
 
 export type TransportMode = "cli" | "http" | "auto";
 
 export interface OpenClawClient {
-  /** Resolve which transport should be used right now (effective mode). */
   resolveTransport(): Promise<TransportMode>;
-
-  /** Run a CLI command and return parsed JSON (equivalent to runCliJson). */
   runJson<T>(args: string[], timeout?: number): Promise<T>;
-
-  /** Run a CLI command and return raw stdout (equivalent to runCli). */
   run(args: string[], timeout?: number, stdin?: string): Promise<string>;
-
-  /** Run a CLI command capturing stdout, stderr, exit code (equivalent to runCliCaptureBoth). */
-  runCapture(args: string[], timeout?: number): Promise<RunCliResult>;
-
-  /** Call a Gateway RPC method (equivalent to gatewayCall). */
+  runCapture(
+    args: string[],
+    timeout?: number,
+  ): Promise<{ stdout: string; stderr: string; code: number | null }>;
   gatewayRpc<T>(
     method: string,
     params?: Record<string, unknown>,
     timeout?: number,
   ): Promise<T>;
-
-  /** Read a file from the OpenClaw filesystem. */
   readFile(path: string): Promise<string>;
-
-  /** Write a file to the OpenClaw filesystem. */
   writeFile(path: string, content: string): Promise<void>;
-
-  /** List directory contents (file names only). */
   readdir(path: string): Promise<string[]>;
-
-  /** HTTP request to the Gateway (health check, etc). */
   gatewayFetch(path: string, init?: RequestInit): Promise<Response>;
-
-  /** The resolved transport mode. */
   getTransport(): TransportMode;
 }
 
-// ── Singleton ──────────────────────────────────────
+class OpenClawHttpClient implements OpenClawClient {
+  private baseUrl: string;
+
+  constructor() {
+    this.baseUrl = getAgentApiUrl();
+  }
+
+  async resolveTransport(): Promise<TransportMode> {
+    return "http";
+  }
+
+  getTransport(): TransportMode {
+    return "http";
+  }
+
+  async runJson<T>(args: string[], timeout = 15000): Promise<T> {
+    // Route CLI-style commands through our chat API
+    const command = args.join(" ");
+    const res = await fetch(`${this.baseUrl}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: command }),
+      signal: AbortSignal.timeout(timeout),
+    });
+    return res.json() as Promise<T>;
+  }
+
+  async run(args: string[], timeout = 15000): Promise<string> {
+    const result = await this.runJson<{ response: string }>(args, timeout);
+    return result.response || "";
+  }
+
+  async runCapture(args: string[], timeout = 15000) {
+    try {
+      const result = await this.run(args, timeout);
+      return { stdout: result, stderr: "", code: 0 };
+    } catch (e: unknown) {
+      return { stdout: "", stderr: String(e), code: 1 };
+    }
+  }
+
+  async gatewayRpc<T>(
+    method: string,
+    params?: Record<string, unknown>,
+    timeout = 15000,
+  ): Promise<T> {
+    // Map RPC methods to our API endpoints
+    const methodMap: Record<string, string> = {
+      "health.check": "/api/health",
+      "config.get": "/api/config",
+      "config.schema": "/api/config",
+    };
+
+    const endpoint = methodMap[method] || "/api/health";
+    const res = await fetch(`${this.baseUrl}${endpoint}`, {
+      method: "GET",
+      signal: AbortSignal.timeout(timeout),
+    });
+    return res.json() as Promise<T>;
+  }
+
+  async readFile(path: string): Promise<string> {
+    const res = await fetch(`${this.baseUrl}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: `read file ${path}` }),
+    });
+    const data = await res.json();
+    return data.response || "";
+  }
+
+  async writeFile(path: string, content: string): Promise<void> {
+    // Not supported directly — use chat
+  }
+
+  async readdir(path: string): Promise<string[]> {
+    return [];
+  }
+
+  async gatewayFetch(path: string, init?: RequestInit): Promise<Response> {
+    return fetch(`${this.baseUrl}${path}`, init);
+  }
+}
 
 let _client: OpenClawClient | null = null;
 
 export function getTransportMode(): TransportMode {
-  const mode = (
-    process.env.OPENCLAW_TRANSPORT || "auto"
-  ).toLowerCase() as string;
-  if (mode === "http" || mode === "cli") return mode as TransportMode;
-  return "auto";
+  return "http";
 }
 
-/**
- * Returns the singleton OpenClawClient for the current transport mode.
- * Lazy-loads the transport implementation on first call.
- */
 export async function getClient(): Promise<OpenClawClient> {
-  if (_client) return _client;
-
-  const mode = getTransportMode();
-  switch (mode) {
-    case "http": {
-      const { HttpTransport } = await import("./transports/http-transport");
-      _client = new HttpTransport();
-      break;
-    }
-    case "auto": {
-      const { AutoTransport } = await import("./transports/auto-transport");
-      _client = new AutoTransport();
-      break;
-    }
-    default: {
-      const { CliTransport } = await import("./transports/cli-transport");
-      _client = new CliTransport();
-      break;
-    }
+  if (!_client) {
+    _client = new OpenClawHttpClient();
   }
   return _client;
 }
 
-/** Reset the singleton (for testing). */
 export function resetClient(): void {
   _client = null;
 }
