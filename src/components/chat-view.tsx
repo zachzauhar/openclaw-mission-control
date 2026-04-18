@@ -1250,13 +1250,42 @@ export function ChatView({ isVisible = true }: { isVisible?: boolean }) {
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      {/* ── Top bar ─────────────── */}
+      {/* ── Top bar with agent selector ─────────────── */}
       <div className="shrink-0 border-b border-stone-200 bg-stone-50 px-4 py-3 md:px-6 dark:border-stone-700 dark:bg-stone-900">
-        <div className="flex items-center gap-2.5">
-          <span className="text-sm">{currentAgent?.emoji || "🤖"}</span>
-          <span className="text-sm font-medium text-stone-700 dark:text-stone-200">
-            {currentAgentTitle}
-          </span>
+        <div className="flex items-center gap-3">
+          {agents.length > 1 ? (
+            <div className="flex items-center gap-1.5">
+              {agents.map((a) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedAgent(a.id);
+                    setMountedAgents((prev) => {
+                      const next = new Set(prev);
+                      next.add(a.id);
+                      return next;
+                    });
+                  }}
+                  className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm transition-colors ${
+                    a.id === selectedAgent
+                      ? "bg-stone-200 font-medium text-stone-800 dark:bg-stone-700 dark:text-stone-100"
+                      : "text-stone-500 hover:bg-stone-100 hover:text-stone-700 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+                  }`}
+                >
+                  <span>{a.emoji}</span>
+                  <span>{agentDisplayName(a)}</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="flex items-center gap-2.5">
+              <span className="text-sm">{currentAgent?.emoji || "🤖"}</span>
+              <span className="text-sm font-medium text-stone-700 dark:text-stone-200">
+                {currentAgentTitle}
+              </span>
+            </div>
+          )}
           {showSecondaryModelLabel && (
             <span className="text-xs text-muted-foreground">
               {currentAgentModelLabel}
